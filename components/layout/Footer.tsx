@@ -72,9 +72,15 @@ export function Footer() {
           </p>
           {/* Acceso discreto al panel interno — no es parte de la
               navegación pública. La ruta ya está protegida con Basic Auth
-              vía middleware.ts, así que este link no necesita lógica propia. */}
+              vía middleware.ts, así que este link no necesita lógica propia.
+              prefetch={false}: por defecto next/link precarga la ruta en
+              cuanto el link entra en el viewport (scroll), y como
+              /admin/agenda pide Basic Auth, esa precarga en segundo plano
+              disparaba el diálogo de credenciales del navegador con solo
+              hacer scroll hasta el Footer, sin que nadie hiciera clic. */}
           <Link
             href="/admin/agenda"
+            prefetch={false}
             aria-label="Acceso administrativo"
             title="Acceso administrativo"
             className="shrink-0 text-neutral-100/30 transition-colors hover:text-neutral-100/70"
