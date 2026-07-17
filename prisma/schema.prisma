@@ -1,0 +1,153 @@
+// Prisma schema — modelo de datos definido en docs/blueprint.md, sección 6.
+// docs/blueprint.md es la fuente de verdad; cualquier cambio de modelo debe reflejarse ahí también.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooler (pgbouncer), usado en runtime por la app
+  directUrl = env("DIRECT_URL") // conexión directa, solo para `prisma migrate`/`db push`
+}
+
+model Space {
+  id           String        @id @default(cuid())
+  name         String
+  description  String
+  rules        String[]
+  capacity     Int
+  baseRate     Decimal? // monto fijo (Salón) o tarifa diurna (Fútbol 11, Futsal) — no es tarifa por hora
+  nightRate    Decimal? // tarifa nocturna (18:00+), solo Fútbol 11 y Futsal; null para el resto
+  bookable     Boolean       @default(true) // false = instalación sin tarifa definida todavía ("próximamente")
+  maxDurationMinutes Int? // límite de duración de una reserva; solo lo usan las canchas, null = sin límite
+  images       String[]
+  availability Json
+  reservations Reservation[]
+}
+
+model Reservation {
+  id        String            @id @default(cuid())
+  spaceId   String
+  space     Space             @relation(fields: [spaceId], references: [id])
+  startTime DateTime
+  endTime   DateTime
+  status    ReservationStatus
+
+  // Datos del contratista (contrato real de alquiler de instalaciones)
+  contractorName          String
+  contractorIdNumber      String
+  contractorProfession    String
+  contractorMaritalStatus MaritalStatus
+  contractorAddress       String
+  contractorPhone         String
+
+  activityDescription String
+  attendeesCount      Int
+
+  // Solo aplica cuando space = Salón Multiusos
+  baseFurnitureSets Int? @default(0) // sets de 1 mesa + 6 sillas, ¢2.500 c/u
+  extraTables       Int? @default(0) // ¢1.000 c/u
+  extraChairs       Int? @default(0) // ¢250 c/u
+  extraTablecloths  Int? @default(0) // ¢1.000 c/u
+
+  // Solo aplica cuando space = Cocina/Comedor
+  cateringPackage CateringPackage?
+
+  totalAmount   Decimal
+  termsAccepted Boolean       @default(false)
+  paymentStatus PaymentStatus @default(DEPOSIT_PENDING)
+  // Fin del día en que se creó la reserva (no el día del evento) — plazo
+  // para pagar el depósito del 50%. null = sin fecha límite (reservas
+  // anteriores a este esquema, exentas de expiración automática).
+  depositDeadline DateTime?
+  createdAt     DateTime      @default(now())
+}
+
+model Project {
+  id           String          @id @default(cuid())
+  title        String
+  summary      String
+  description  String
+  status       ProjectStatus
+  progress     Int
+  showProgress Boolean         @default(true) // false = ocultar la barra (ej. convocatorias/promociones sin avance %)
+  contactName  String?
+  contactPhone String?
+  impact       Json
+  images       String[]
+  updates      ProjectUpdate[]
+}
+
+model ProjectUpdate {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  title     String
+  content   String
+  images    String[]
+  createdAt DateTime @default(now())
+}
+
+model Event {
+  id          String      @id @default(cuid())
+  type        ContentType
+  slug        String      @unique
+  title       String
+  summary     String? // teaser corto para tarjetas de listado; si es null, se usa description completo
+  description String
+  imageUrl    String?
+  startDate   DateTime
+  endDate     DateTime?
+  location    String?
+  category    String
+  featured    Boolean     @default(false)
+  published   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+enum MaritalStatus {
+  SOLTERO
+  CASADO
+  DIVORCIADO
+  VIUDO
+  UNION_LIBRE
+}
+
+enum CateringPackage {
+  PERSONS_35
+  PERSONS_50
+  PERSONS_75
+}
+
+enum ContentType {
+  NEWS
+  EVENT
+}
+
+enum PaymentStatus {
+  DEPOSIT_PENDING
+  DEPOSIT_PAID
+  FULLY_PAID
+}

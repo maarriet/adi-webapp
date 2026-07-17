@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --yes create-next-app@14 --help)"
+    ]
+  }
+}

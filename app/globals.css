@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* Colores primarios — marca oficial de LA ADI (valores hex dados
+     directamente por el usuario/guía de marca). Reemplazan tanto la paleta
+     placeholder del blueprint sección 2 como la aproximación por muestreo
+     de píxeles usada antes de tener estos valores oficiales (ver CLAUDE.md). */
+  --primary-blue: #152a4e; /* Azul marino oscuro de marca */
+  --primary-green: #059669; /* Crecimiento, comunidad (sin cambios) */
+  --accent-orange: #e8792b; /* Naranja de marca */
+  --swoosh-gray: #8c929b; /* Gris del detalle decorativo del logo */
+
+  /* Neutrales */
+  --neutral-50: #f8fafc;
+  --neutral-100: #f1f5f9;
+  --neutral-600: #475569;
+  --neutral-800: #1e293b;
+  --neutral-900: #0f172a;
+
+  /* Colores semánticos */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --info: #3b82f6;
+
+  /* Escala de espaciado */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
