@@ -15,9 +15,11 @@ const RESERVATION_STATUS_LABELS: Record<string, string> = {
 
 export function ReservationDetailModal({
   reservation,
+  receiptSignedUrl,
   onClose,
 }: {
   reservation: ReservationCardData;
+  receiptSignedUrl: string | null;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -91,14 +93,22 @@ export function ReservationDetailModal({
           <dt className="text-neutral-600">Cédula</dt>
           <dd className="text-neutral-900">{reservation.contractorIdNumber}</dd>
 
-          <dt className="text-neutral-600">Profesión</dt>
-          <dd className="text-neutral-900">{reservation.contractorProfession}</dd>
+          {reservation.contractorProfession && (
+            <>
+              <dt className="text-neutral-600">Profesión</dt>
+              <dd className="text-neutral-900">{reservation.contractorProfession}</dd>
+            </>
+          )}
 
-          <dt className="text-neutral-600">Estado civil</dt>
-          <dd className="text-neutral-900">
-            {MARITAL_STATUS_LABELS[reservation.contractorMaritalStatus] ??
-              reservation.contractorMaritalStatus}
-          </dd>
+          {reservation.contractorMaritalStatus && (
+            <>
+              <dt className="text-neutral-600">Estado civil</dt>
+              <dd className="text-neutral-900">
+                {MARITAL_STATUS_LABELS[reservation.contractorMaritalStatus] ??
+                  reservation.contractorMaritalStatus}
+              </dd>
+            </>
+          )}
 
           <dt className="text-neutral-600">Dirección</dt>
           <dd className="text-neutral-900">{reservation.contractorAddress}</dd>
@@ -140,6 +150,23 @@ export function ReservationDetailModal({
               wizard público, pero ese dato nunca se guarda en Reservation
               (solo viaja al email de notificación) — no hay nada que
               mostrar acá para ese espacio, ver CLAUDE.md. */}
+
+          {receiptSignedUrl && (
+            <>
+              <dt className="col-span-2 mt-2 border-t border-neutral-100 pt-2 text-neutral-600">
+                Comprobante de pago
+              </dt>
+              <dd className="col-span-2">
+                <a href={receiptSignedUrl} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={receiptSignedUrl}
+                    alt="Comprobante de pago"
+                    className="max-h-64 rounded border border-neutral-100"
+                  />
+                </a>
+              </dd>
+            </>
+          )}
         </dl>
       </div>
     </div>

@@ -3,7 +3,7 @@
 // Prisma directamente en las páginas — ver lib/prisma.ts.
 
 // Horas del día disponibles para reservar (bloques de una hora) — regla de
-// negocio de horario de atención, no una tabla.
+// negocio de horario de atención, 08:00-22:00, no una tabla.
 export const timeSlots: string[] = [
   "08:00",
   "09:00",
@@ -18,6 +18,8 @@ export const timeSlots: string[] = [
   "18:00",
   "19:00",
   "20:00",
+  "21:00",
+  "22:00",
 ];
 
 // Resumen del informe financiero — presentado como logros/reinversión

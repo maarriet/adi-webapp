@@ -65,6 +65,24 @@ export async function getBookedSlots(
   );
 }
 
+// Compartida entre createReservation y createManualReservation — misma
+// query exacta en ambas, no solo parecida.
+async function hasReservationConflict(
+  spaceId: string,
+  startTime: Date,
+  endTime: Date,
+): Promise<boolean> {
+  const conflict = await prisma.reservation.findFirst({
+    where: {
+      spaceId,
+      status: { not: "CANCELLED" },
+      startTime: { lt: endTime },
+      endTime: { gt: startTime },
+    },
+  });
+  return conflict !== null;
+}
+
 export type CreateReservationInput = {
   spaceId: string;
   // Nombre del espacio, ya conocido por el wizard (evita una query extra
@@ -77,8 +95,10 @@ export type CreateReservationInput = {
   contractorName: string;
   contractorIdNumber: string;
   contractorPhone: string;
-  contractorProfession: string;
-  contractorMaritalStatus: MaritalStatus;
+  // Solo aplican para Salón Multiusos y Cocina/Comedor — null para canchas
+  // (Fútbol 11, Futsal), que no los piden en el wizard.
+  contractorProfession: string | null;
+  contractorMaritalStatus: MaritalStatus | null;
   contractorAddress: string;
   activityDescription: string;
   attendeesCount: number;
@@ -187,6 +207,20 @@ async function sendReservationNotificationEmail(
   }
 }
 
+// Solo los campos que la lógica de precios realmente necesita — tanto
+// createReservation (con CreateReservationInput completo) como
+// createManualReservation (que no pide mobiliario/paquete) le pasan un
+// objeto que cumple esta forma más angosta.
+type PricingInput = {
+  spaceId: string;
+  endTime: string;
+  baseFurnitureSets: number;
+  extraTables: number;
+  extraChairs: number;
+  extraTablecloths: number;
+  cateringPackage: CateringPackageId | null;
+};
+
 // Recalcula el monto en el servidor — nunca se confía en `input.totalAmount`
 // (un cliente malicioso podría mandar cualquier valor). Misma lógica de
 // precios y misma bifurcación por espacio que ReservationWizard.tsx, pero
@@ -194,7 +228,7 @@ async function sendReservationNotificationEmail(
 // campos ni siquiera viajan en CreateReservationInput) en vez de confiar en
 // nada que venga del cliente.
 async function calculateServerTotalAmount(
-  input: CreateReservationInput,
+  input: PricingInput,
 ): Promise<number> {
   if (input.spaceId === "salon-multiusos") {
     return calculateSalonTotal({
@@ -237,16 +271,7 @@ export async function createReservation(
   const startTime = new Date(`${input.date}T${input.startTime}:00`);
   const endTime = new Date(`${input.date}T${input.endTime}:00`);
 
-  const conflict = await prisma.reservation.findFirst({
-    where: {
-      spaceId: input.spaceId,
-      status: { not: "CANCELLED" },
-      startTime: { lt: endTime },
-      endTime: { gt: startTime },
-    },
-  });
-
-  if (conflict) {
+  if (await hasReservationConflict(input.spaceId, startTime, endTime)) {
     return {
       ok: false,
       error: "Ese horario ya no está disponible. Por favor elige otro.",
@@ -300,6 +325,90 @@ export async function createReservation(
 
   await sendReservationNotificationEmail(input, created.id, totalAmount);
 
+  return { ok: true, id: created.id };
+}
+
+export type CreateManualReservationInput = {
+  spaceId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  contractorName: string;
+  contractorIdNumber?: string;
+  contractorPhone?: string;
+  contractorAddress?: string;
+  activityDescription?: string;
+  attendeesCount?: number;
+  paymentStatus: "DEPOSIT_PENDING" | "DEPOSIT_PAID" | "FULLY_PAID";
+};
+
+// Para reservas coordinadas por fuera del sitio (WhatsApp, teléfono) que
+// un admin registra directo desde /admin/agenda — a diferencia de
+// createReservation (wizard público), no exige depósito ni le pone
+// vencimiento, y el estado de pago lo elige el admin en vez de arrancar
+// siempre en DEPOSIT_PENDING.
+export async function createManualReservation(
+  input: CreateManualReservationInput,
+): Promise<CreateReservationResult> {
+  const startTime = new Date(`${input.date}T${input.startTime}:00`);
+  const endTime = new Date(`${input.date}T${input.endTime}:00`);
+
+  if (startTime >= endTime) {
+    return {
+      ok: false,
+      error: "La hora de fin debe ser posterior a la de inicio.",
+    };
+  }
+
+  if (await hasReservationConflict(input.spaceId, startTime, endTime)) {
+    return { ok: false, error: "Ese horario ya tiene una reserva." };
+  }
+
+  // Misma lógica de precios que el wizard público, vía la función interna
+  // ya usada por createReservation — este formulario no pide mobiliario/
+  // paquete/deporte, así que para Salón sale el monto base sin extras y
+  // para Cocina/Comedor sale ¢0 si no se especifica paquete (limitación
+  // conocida: este formulario no tiene selector de paquete).
+  const totalAmount = await calculateServerTotalAmount({
+    spaceId: input.spaceId,
+    endTime: input.endTime,
+    baseFurnitureSets: 0,
+    extraTables: 0,
+    extraChairs: 0,
+    extraTablecloths: 0,
+    cateringPackage: null,
+  });
+
+  const created = await prisma.reservation.create({
+    data: {
+      spaceId: input.spaceId,
+      startTime,
+      endTime,
+      // CONFIRMED, no PENDING: a diferencia del wizard público (que
+      // arranca en PENDING, pendiente de revisión de LA ADI), estas ya
+      // fueron coordinadas y acordadas de antemano — no hay nada que
+      // revisar.
+      status: "CONFIRMED",
+      paymentStatus: input.paymentStatus,
+      // Null a propósito, NUNCA se calcula "fin del día de hoy" — es lo
+      // que exime a estas reservas de releaseExpiredDeposits() (que solo
+      // actúa sobre paymentStatus: DEPOSIT_PENDING con depositDeadline
+      // vencido; un depositDeadline null nunca matchea ese filtro).
+      depositDeadline: null,
+      contractorName: input.contractorName,
+      contractorIdNumber: input.contractorIdNumber?.trim() || "No registrado",
+      contractorPhone: input.contractorPhone?.trim() || "No registrado",
+      contractorAddress: input.contractorAddress?.trim() || "No registrado",
+      activityDescription: input.activityDescription?.trim() || "No registrado",
+      attendeesCount: input.attendeesCount || 0,
+      totalAmount,
+    },
+  });
+
+  // Sin email de notificación (a diferencia de createReservation): esto no
+  // es una solicitud nueva que alguien deba revisar, ya se sabe de ella.
+
+  revalidatePath("/admin/agenda");
   return { ok: true, id: created.id };
 }
 

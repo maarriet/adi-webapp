@@ -41,6 +41,9 @@ export function ReservationWizard({ spaces }: { spaces: ReservationSpace[] }) {
   }
 
   const selectedSpace = spaces.find((s) => s.id === form.spaceId) ?? null;
+  // Mismo criterio ya usado en StepFechaHora.tsx / app/admin/agenda —
+  // las canchas no piden profesión/estado civil.
+  const isCourt = selectedSpace?.maxDurationMinutes != null;
 
   const totalAmount =
     form.spaceId === "salon-multiusos"
@@ -79,8 +82,8 @@ export function ReservationWizard({ spaces }: { spaces: ReservationSpace[] }) {
         form.contractorName.trim() !== "" &&
         form.contractorIdNumber.trim() !== "" &&
         CONTRACTOR_PHONE_PATTERN.test(form.contractorPhone) &&
-        form.contractorProfession.trim() !== "" &&
-        form.contractorMaritalStatus !== "" &&
+        (isCourt || form.contractorProfession.trim() !== "") &&
+        (isCourt || form.contractorMaritalStatus !== "") &&
         form.contractorAddress.trim() !== "" &&
         form.activityDescription.trim() !== "" &&
         Number(form.attendeesCount) > 0
@@ -104,11 +107,8 @@ export function ReservationWizard({ spaces }: { spaces: ReservationSpace[] }) {
       contractorName: form.contractorName,
       contractorIdNumber: form.contractorIdNumber,
       contractorPhone: form.contractorPhone,
-      contractorProfession: form.contractorProfession,
-      contractorMaritalStatus: form.contractorMaritalStatus as Exclude<
-        ReservationFormState["contractorMaritalStatus"],
-        ""
-      >,
+      contractorProfession: form.contractorProfession.trim() || null,
+      contractorMaritalStatus: form.contractorMaritalStatus || null,
       contractorAddress: form.contractorAddress,
       activityDescription: form.activityDescription,
       attendeesCount: Number(form.attendeesCount),
@@ -210,7 +210,9 @@ export function ReservationWizard({ spaces }: { spaces: ReservationSpace[] }) {
           maxDurationMinutes={selectedSpace?.maxDurationMinutes ?? null}
         />
       )}
-      {step === 3 && <StepContratista form={form} updateField={updateField} />}
+      {step === 3 && (
+        <StepContratista form={form} updateField={updateField} isCourt={isCourt} />
+      )}
       {step === 4 && (
         <StepResumen
           form={form}

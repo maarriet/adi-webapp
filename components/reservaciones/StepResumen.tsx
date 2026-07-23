@@ -80,10 +80,14 @@ export function StepResumen({
           {form.contractorPhone}
         </dd>
 
-        <dt className="text-neutral-600">Estado civil</dt>
-        <dd className="text-neutral-900">
-          {MARITAL_STATUS_LABELS[form.contractorMaritalStatus] ?? "—"}
-        </dd>
+        {form.contractorMaritalStatus && (
+          <>
+            <dt className="text-neutral-600">Estado civil</dt>
+            <dd className="text-neutral-900">
+              {MARITAL_STATUS_LABELS[form.contractorMaritalStatus] ?? "—"}
+            </dd>
+          </>
+        )}
 
         <dt className="text-neutral-600">Actividad</dt>
         <dd className="text-neutral-900">

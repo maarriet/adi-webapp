@@ -37,8 +37,10 @@ model Reservation {
   // Datos del contratista (contrato real de alquiler de instalaciones)
   contractorName          String
   contractorIdNumber      String
-  contractorProfession    String
-  contractorMaritalStatus MaritalStatus
+  // Solo aplican para Salón Multiusos y Cocina/Comedor — las canchas no
+  // los piden (ver CLAUDE.md).
+  contractorProfession    String?
+  contractorMaritalStatus MaritalStatus?
   contractorAddress       String
   contractorPhone         String
 
@@ -61,6 +63,13 @@ model Reservation {
   // para pagar el depósito del 50%. null = sin fecha límite (reservas
   // anteriores a este esquema, exentas de expiración automática).
   depositDeadline DateTime?
+  // A pesar del nombre, guarda la RUTA del objeto en el bucket privado de
+  // Supabase Storage "recibos-pago" (ej. "<reservationId>/<timestamp>-
+  // archivo.jpg"), no una URL — un bucket privado no tiene URLs públicas
+  // permanentes, así que la URL real (firmada, con expiración) se genera
+  // al vuelo desde esta ruta cada vez que se necesita mostrar el
+  // comprobante (ver lib/supabase-admin.ts).
+  receiptUrl String?
   createdAt     DateTime      @default(now())
 }
 

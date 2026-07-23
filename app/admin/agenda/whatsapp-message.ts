@@ -47,6 +47,24 @@ export function buildDayReminderMessage({
   return `Hola ${contractorName}, te recordamos tu reserva de hoy en ${spaceName} de ${startTime} a ${endTime}. Recuerda realizar el pago del 50% restante (${remainingAmount}) durante el día por SINPE al ${siteConfig.sinpeNumber} y enviar el comprobante a este WhatsApp. ¡Te esperamos! - ADI Quebradas y Calle Vargas`;
 }
 
+// DEPOSIT_PAID o FULLY_PAID: confirma que el pago (depósito o completo)
+// ya se recibió y registró.
+export function buildPaymentConfirmedMessage({
+  contractorName,
+  spaceName,
+  date,
+  startTime,
+  endTime,
+}: {
+  contractorName: string;
+  spaceName: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}): string {
+  return `Hola ${contractorName}, confirmamos que recibimos tu pago para la reserva de ${spaceName} el ${date} de ${startTime} a ${endTime}. ¡Tu reserva está confirmada! Nos vemos pronto. - ADI Quebradas y Calle Vargas`;
+}
+
 // Mismo formato sin "+" que getWhatsappHref (lib/site-config.ts).
 export function buildWhatsappReminderHref(phone: string, message: string): string {
   const digits = phone.replace(/-/g, "");

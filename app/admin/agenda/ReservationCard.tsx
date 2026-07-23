@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowUpTrayIcon,
   InformationCircleIcon,
   XCircleIcon,
 } from "@heroicons/react/24/outline";
@@ -14,6 +15,7 @@ import {
   markDepositPaid,
   markFullyPaid,
 } from "@/lib/actions/reservations";
+import { uploadReceipt } from "@/lib/actions/receipts";
 import { ReservationDetailModal } from "./ReservationDetailModal";
 
 export type ReservationCardData = {
@@ -28,8 +30,9 @@ export type ReservationCardData = {
   contractorName: string;
   contractorPhone: string;
   contractorIdNumber: string;
-  contractorProfession: string;
-  contractorMaritalStatus: string;
+  // Solo aplican para Salón Multiusos y Cocina/Comedor — null para canchas.
+  contractorProfession: string | null;
+  contractorMaritalStatus: string | null;
   contractorAddress: string;
   activityDescription: string;
   attendeesCount: number;
@@ -47,14 +50,21 @@ export function ReservationCard({
   reservation,
   depositRequestWhatsappHref,
   dayReminderWhatsappHref,
+  paymentConfirmedWhatsappHref,
+  receiptSignedUrl,
 }: {
   reservation: ReservationCardData;
   depositRequestWhatsappHref: string | null;
   dayReminderWhatsappHref: string | null;
+  paymentConfirmedWhatsappHref: string | null;
+  receiptSignedUrl: string | null;
 }) {
   const router = useRouter();
   const [detailOpen, setDetailOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
 
   async function handleCancel() {
     const confirmed = window.confirm(
@@ -72,6 +82,29 @@ export function ReservationCard({
       router.refresh();
     } finally {
       setIsCancelling(false);
+    }
+  }
+
+  async function handleReceiptChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingReceipt(true);
+    setReceiptError(null);
+    try {
+      const formData = new FormData();
+      formData.append("receipt", file);
+      const result = await uploadReceipt(reservation.id, formData);
+      if (result.ok) {
+        router.refresh();
+      } else {
+        setReceiptError(result.error);
+      }
+    } finally {
+      setIsUploadingReceipt(false);
+      // Permite volver a elegir el mismo archivo (ej. tras un error) sin
+      // que el navegador ignore el cambio por ser el mismo valor.
+      event.target.value = "";
     }
   }
 
@@ -164,6 +197,19 @@ export function ReservationCard({
           </>
         )}
 
+        {(reservation.paymentStatus === "DEPOSIT_PAID" ||
+          reservation.paymentStatus === "FULLY_PAID") &&
+          paymentConfirmedWhatsappHref && (
+            <a
+              href={paymentConfirmedWhatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border border-primary-green px-3 py-1.5 text-sm font-medium text-primary-green transition-colors hover:bg-primary-green/10"
+            >
+              Enviar confirmación de pago
+            </a>
+          )}
+
         <Button
           variant="ghost"
           size="sm"
@@ -184,9 +230,63 @@ export function ReservationCard({
         </Button>
       </div>
 
+      {/* Comprobante SINPE — siempre visible (no depende de paymentStatus,
+          el comprobante puede llegar en cualquier momento, incluso antes
+          de marcar el depósito como pagado). */}
+      <div className="mt-3 flex items-center gap-3 border-t border-neutral-100 pt-3">
+        <input
+          ref={receiptInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleReceiptChange}
+        />
+        {receiptSignedUrl ? (
+          <>
+            <a href={receiptSignedUrl} target="_blank" rel="noopener noreferrer">
+              <img
+                src={receiptSignedUrl}
+                alt="Comprobante de pago"
+                className="h-10 w-10 rounded object-cover"
+              />
+            </a>
+            <a
+              href={receiptSignedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-primary-blue hover:underline"
+            >
+              Ver comprobante
+            </a>
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={isUploadingReceipt}
+              onClick={() => receiptInputRef.current?.click()}
+            >
+              Reemplazar
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<ArrowUpTrayIcon className="h-4 w-4" />}
+            loading={isUploadingReceipt}
+            onClick={() => receiptInputRef.current?.click()}
+          >
+            Subir comprobante
+          </Button>
+        )}
+        {receiptError && (
+          <span className="text-xs text-error">{receiptError}</span>
+        )}
+      </div>
+
       {detailOpen && (
         <ReservationDetailModal
           reservation={reservation}
+          receiptSignedUrl={receiptSignedUrl}
           onClose={() => setDetailOpen(false)}
         />
       )}

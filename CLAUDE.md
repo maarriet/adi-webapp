@@ -14,7 +14,9 @@ que se documente explícitamente un cambio.
 - Tailwind CSS
 - Prisma (`prisma@6.19.3`, `@prisma/client@6.19.3` — versión fijada intencionalmente,
   ver nota abajo) como ORM
-- Supabase (PostgreSQL) como base de datos
+- Supabase (PostgreSQL) como base de datos, y Supabase Storage (vía
+  `@supabase/supabase-js`) para el bucket privado de comprobantes de pago
+  — ver "Estructura de carpetas" (`lib/supabase-admin.ts`) abajo
 - `@heroicons/react` (variante outline) para iconografía, según la
   recomendación de la sección 2 del blueprint
 
@@ -66,11 +68,13 @@ datasource db {
 seed`) porque pgbouncer en modo transacción no soporta bien las prepared
 statements que las migraciones necesitan. Sin esta separación, `prisma
 migrate dev` falla o se cuelga contra Supabase. Ambas variables (más
-`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`, todavía sin usar
-en código — quedan listas para Auth/Storage a futuro; `RESEND_API_KEY`/
-`NOTIFICATION_EMAIL`, notificación por email de reservas nuevas; y
-`ADMIN_PASSWORD`, contraseña de `/admin/agenda`, ver "Estructura de
-carpetas" abajo) están documentadas con placeholders en `.env.example`.
+`NEXT_PUBLIC_SUPABASE_URL` — ya se usa también para Storage, ver abajo —
+y `NEXT_PUBLIC_SUPABASE_ANON_KEY`, esta última todavía sin usar en código,
+lista para Auth a futuro; `RESEND_API_KEY`/`NOTIFICATION_EMAIL`,
+notificación por email de reservas nuevas; `ADMIN_PASSWORD`, contraseña de
+`/admin/agenda`; y `SUPABASE_SERVICE_ROLE_KEY`, solo-servidor, para el
+bucket de comprobantes de pago, ver "Estructura de carpetas" abajo) están
+documentadas con placeholders en `.env.example`.
 
 **Páginas con datos en vivo son `export const dynamic = "force-dynamic"`**
 (`app/page.tsx`, `app/proyectos/page.tsx`, `app/noticias-eventos/page.tsx` +
@@ -134,6 +138,18 @@ Button, Card y todas las páginas automáticamente.
 - `lib/prisma.ts` — único punto de acceso al cliente de Prisma (patrón singleton
   para evitar agotar conexiones en dev por hot-reload). Importar `prisma` desde
   aquí, no instanciar `PrismaClient` en otros archivos.
+- `lib/supabase-admin.ts` — cliente de Supabase con la **service role key**
+  (`SUPABASE_SERVICE_ROLE_KEY`, solo-servidor) — bypassa RLS por completo,
+  así que **solo se importa desde Server Actions** (`lib/actions/receipts.ts`),
+  nunca desde un Client Component. Hoy se usa exclusivamente para Storage:
+  el bucket privado `recibos-pago` (comprobantes de pago SINPE) se creó
+  una única vez con un script suelto (`storage.createBucket("recibos-pago",
+  { public: false })`, no quedó como parte del código de la app — mismo
+  espíritu que `prisma/seed.ts`, pero infraestructura de un solo uso, no
+  se vuelve a correr). Con la anon key no alcanza: un bucket privado no
+  tiene URLs públicas ni permite subir archivos sin RLS configurado
+  explícitamente, así que tanto la subida como la lectura pasan por el
+  servidor con la service role key.
 - `prisma/schema.prisma` — modelos `Space`, `Reservation`, `Project`,
   `ProjectUpdate`, `Event` tal como se definen en `docs/blueprint.md` sección 6,
   con extensiones documentadas:
@@ -155,8 +171,23 @@ Button, Card y todas las páginas automáticamente.
     `contractorIdNumber`, `contractorPhone`, `contractorProfession`,
     `contractorMaritalStatus`, `contractorAddress` — el campo de teléfono se
     llama `contractorPhone`, no `requesterPhone`, para seguir la misma
-    convención de nombres que ya tenían el resto de campos del contratista),
-    detalle de actividad (`activityDescription`,
+    convención de nombres que ya tenían el resto de campos del contratista).
+    **`contractorProfession`/`contractorMaritalStatus` son nullable**
+    (`String?`/`MaritalStatus?`): el contrato real solo los pide para Salón
+    Multiusos y Cocina/Comedor, no para las canchas — `StepContratista.tsx`
+    deja de renderizar esos dos `FormField` cuando `isCourt` (mismo
+    criterio `space.maxDurationMinutes != null` ya usado en otros lugares),
+    y `ReservationWizard.tsx` no los exige en la validación de "Continuar"
+    del paso 3 en ese caso. Pasar de requerido a opcional no arriesga datos
+    existentes (ninguna fila se vuelve `null` sola), así que a diferencia
+    de los cambios de enum, `prisma migrate dev` generó y aplicó la
+    migración directo, sin necesitar el flujo manual de
+    `--create-only`/SQL a mano/`migrate deploy`. `StepResumen.tsx` y
+    `ReservationDetailModal.tsx` (`/admin/agenda`) omiten la fila "Estado
+    civil"/"Profesión" por completo cuando el valor es `null`, en vez de
+    mostrarla vacía — mismo patrón ya usado ahí para "Paquete" (Cocina/
+    Comedor) y "Deporte" (Futsal, que ni siquiera se persiste).
+    Detalle de actividad (`activityDescription`,
     `attendeesCount`), opciones de precio específicas por espacio
     (`baseFurnitureSets`/`extraTables`/`extraChairs`/`extraTablecloths` para
     Salón Multiusos; `cateringPackage` para Cocina/Comedor — mutuamente
@@ -190,6 +221,21 @@ Button, Card y todas las páginas automáticamente.
     `startTime`/`endTime`, ver `lib/format.ts`). `null` = sin fecha límite,
     usado para las reservas anteriores a este esquema (ver migración
     abajo) — quedan exentas de la expiración automática.
+  - **`Reservation.receiptUrl`** (`String?`, nuevo): a pesar del nombre,
+    guarda la **ruta** del objeto en el bucket privado de Supabase Storage
+    `recibos-pago` (ej. `<reservationId>/<timestamp>-archivo.jpg`), no una
+    URL — un bucket privado no tiene URLs públicas permanentes, así que
+    guardar una URL firmada directamente se rompería sola al expirar. La
+    URL firmada real (1 hora de vigencia) se genera al vuelo desde esta
+    ruta cada vez que `/admin/agenda` se renderiza
+    (`getReceiptSignedUrl`, `lib/actions/receipts.ts`). Se sube vía
+    `uploadReceipt(reservationId, formData)` (valida que sea imagen y
+    pese menos de 10MB) — botón "Subir comprobante" en
+    `ReservationCard.tsx`, **siempre visible sin importar `paymentStatus`**
+    (el comprobante puede llegar antes de que el admin marque el pago).
+    No borra el archivo anterior si se reemplaza un comprobante (cada
+    subida usa una ruta con timestamp único) — simplificación consciente,
+    el volumen de esta herramienta no justifica limpiar archivos huérfanos.
   - **Expiración automática del depósito, sin cron** —
     `releaseExpiredDeposits()` (`lib/actions/reservations.ts`, exportada):
     cancela (`status: "CANCELLED"`) cualquier reserva con
@@ -564,9 +610,12 @@ Button, Card y todas las páginas automáticamente.
     **2 mensajes distintos según el punto del esquema de depósito** (no
     variantes por tipo de espacio como en una versión anterior):
     `buildDepositRequestMessage` (`DEPOSIT_PENDING` — pide el depósito del
-    50%, menciona el corte de medianoche) y `buildDayReminderMessage`
-    (`DEPOSIT_PAID` — recuerda el 50% restante "de hoy"). Mismo formato de
-    teléfono sin `+` que `getWhatsappHref` en `lib/site-config.ts`
+    50%, menciona el corte de medianoche), `buildDayReminderMessage`
+    (`DEPOSIT_PAID` — recuerda el 50% restante "de hoy") y
+    `buildPaymentConfirmedMessage` (`DEPOSIT_PAID` **o** `FULLY_PAID` —
+    confirma que el pago ya se recibió; a diferencia de los otros dos, que
+    son exclusivos de un solo estado, este botón aparece en ambos). Mismo
+    formato de teléfono sin `+` que `getWhatsappHref` en `lib/site-config.ts`
     (`https://wa.me/506<telefono>?text=<mensaje codificado>`, vía
     `buildWhatsappReminderHref`, sin cambios). Ambos mensajes usan
     `siteConfig.sinpeNumber` (no repiten el literal) y `formatColones`
@@ -668,7 +717,48 @@ Button, Card y todas las páginas automáticamente.
     conflicto de `createReservation` ya filtran `status: { not:
     "CANCELLED" }` — no hace falta tocar nada más, verificado en vivo
     (cancelar una reserva de prueba y confirmar que ese horario vuelve a
-    aparecer como disponible en `/reservaciones`).
+    aparecer como disponible en `/reservaciones`). También exporta
+    `createManualReservation(input)`, usada por
+    `app/admin/agenda/AddManualReservationForm.tsx` (sección expandible al
+    inicio de `/admin/agenda`, no modal) para registrar reservas
+    coordinadas por fuera del sitio (WhatsApp, teléfono) — a diferencia de
+    `createReservation` (wizard público): solo exige espacio/fecha/
+    horario/nombre (el resto de campos de texto caen a `"No registrado"` y
+    `attendeesCount` a `0` si se dejan vacíos, aplicado en el servidor, no
+    en el formulario), el estado de pago lo elige el admin en el momento
+    (sin default forzado) en vez de arrancar siempre en
+    `DEPOSIT_PENDING`, el `status` inicial es `CONFIRMED` (no `PENDING`:
+    ya fueron coordinadas y acordadas, no hay nada que revisar), **y
+    `depositDeadline` queda `null` siempre** — nunca se calcula "fin del
+    día de hoy", que es justo lo que las exime de
+    `releaseExpiredDeposits()`. Comparte `hasReservationConflict`
+    (extraído de `createReservation`, que también lo usa ahora) y
+    `calculateServerTotalAmount` (con `PricingInput`, un tipo más angosto
+    que `CreateReservationInput` — extraído para que este segundo call
+    site no tenga que fabricar un objeto con todos los campos del wizard
+    público que no aplican acá) para no duplicar ni la validación de
+    solapamiento ni el cálculo de precio. **Limitación conocida**: el
+    formulario no tiene selector de paquete para Cocina/Comedor, así que
+    una reserva manual de ese espacio sale en ¢0 — ninguna de las 5
+    reservas reales cargadas usa ese espacio, así que no se resolvió
+    todavía. Sin email de notificación (a diferencia de
+    `createReservation`): no es una solicitud nueva que alguien deba
+    revisar. **5 reservas reales cargadas** con esta acción (Cancha de
+    Fútbol 11, 09:00-11:00, `FULLY_PAID`): 26 jul. (Gilbert), 6 sep., 20
+    sep. y 27 sep. (Tito el 20, Jhon/equipo comunal los otros dos) y 11
+    oct. 2026 (Jhon/equipo comunal) — coordinadas con el encargado
+    anterior por fuera del sitio, cargadas solo para bloquear el horario
+    y evitar dobles reservas, no para llevar un registro de contacto (por
+    eso los demás campos quedan en `"No registrado"`/`0`). **Nota de
+    entorno**: `revalidatePath` (usado por `createManualReservation`,
+    igual que `markDepositPaid`/`markFullyPaid`/`cancelReservation`) tira
+    `Invariant: static generation store missing` si se llama la Server
+    Action desde un script standalone (`tsx algo.ts`) en vez de una
+    request real de Next.js — la escritura en la base ya se completó
+    ANTES de esa línea (es la última del cuerpo de la función), así que
+    la fila queda guardada igual; solo hay que envolver la llamada en
+    `try/catch` en el script y ese error específico se puede ignorar. Así
+    se cargaron las 5 reservas de arriba.
   - `contact.ts`: `submitContactMessage(input)` (crea el `ContactMessage`,
     luego llama `sendContactNotificationEmail` — mismo patrón best-effort
     que `sendReservationNotificationEmail`: Resend, `from:
@@ -684,7 +774,7 @@ Button, Card y todas las páginas automáticamente.
   vista de confirmación solo si la escritura fue exitosa; si falla, muestra
   un mensaje de error en vez de fingir éxito.
 - `lib/mock-data.ts` — **solo** contenido sin modelo correspondiente en el
-  schema: `timeSlots` (regla de negocio de horario de atención, 08:00–20:00,
+  schema: `timeSlots` (regla de negocio de horario de atención, 08:00–22:00,
   no una tabla) y `financialImpactSummary` (informe financiero julio
   2025–mayo 2026, presentado como logros/reinversión — el desglose de
   aportes municipales/Hacienda/CoopeTransasi no vino individualizado, se

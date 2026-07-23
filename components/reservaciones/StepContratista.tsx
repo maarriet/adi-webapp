@@ -18,9 +18,11 @@ const MARITAL_STATUS_OPTIONS = [
 export function StepContratista({
   form,
   updateField,
+  isCourt,
 }: {
   form: ReservationFormState;
   updateField: UpdateField;
+  isCourt: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -60,28 +62,32 @@ export function StepContratista({
         }
         required
       />
-      <FormField
-        type="text"
-        label="Profesión"
-        name="contractorProfession"
-        value={form.contractorProfession}
-        onChange={(v) => updateField("contractorProfession", v)}
-        required
-      />
-      <FormField
-        type="select"
-        label="Estado civil"
-        name="contractorMaritalStatus"
-        value={form.contractorMaritalStatus}
-        onChange={(v) =>
-          updateField(
-            "contractorMaritalStatus",
-            v as ReservationFormState["contractorMaritalStatus"],
-          )
-        }
-        options={MARITAL_STATUS_OPTIONS}
-        required
-      />
+      {!isCourt && (
+        <>
+          <FormField
+            type="text"
+            label="Profesión"
+            name="contractorProfession"
+            value={form.contractorProfession}
+            onChange={(v) => updateField("contractorProfession", v)}
+            required
+          />
+          <FormField
+            type="select"
+            label="Estado civil"
+            name="contractorMaritalStatus"
+            value={form.contractorMaritalStatus}
+            onChange={(v) =>
+              updateField(
+                "contractorMaritalStatus",
+                v as ReservationFormState["contractorMaritalStatus"],
+              )
+            }
+            options={MARITAL_STATUS_OPTIONS}
+            required
+          />
+        </>
+      )}
       <FormField
         type="text"
         label="Vecindario / dirección"
