@@ -215,12 +215,14 @@ Button, Card y todas las páginas automáticamente.
     (2 estados, `PENDING`/`PAID`) — ver migración de datos abajo.
   - **`Reservation.depositDeadline`** (`DateTime?`, nuevo): fin del día en
     que se **creó** la reserva (no el día del evento) — plazo para pagar el
-    depósito. Se fija en `createReservation` con
-    `new Date(); .setHours(23, 59, 59, 999)` (hora local del servidor,
-    mismo patrón "local sin conversión UTC" que ya usan
-    `startTime`/`endTime`, ver `lib/format.ts`). `null` = sin fecha límite,
-    usado para las reservas anteriores a este esquema (ver migración
-    abajo) — quedan exentas de la expiración automática.
+    depósito. Se fija en `createReservation` con `toCostaRicaDate(
+    costaRicaTodayDateString(), "23:59:59.999")` (`lib/timezone.ts`) —
+    anclado explícitamente a hora de Costa Rica, no a la zona del proceso
+    (ver `lib/format.ts` para el bug real que motivó este cambio: antes
+    usaba `new Date(); .setHours(23, 59, 59, 999)`, que dependía de la zona
+    del servidor). `null` = sin fecha límite, usado para las reservas
+    anteriores a este esquema (ver migración abajo) — quedan exentas de la
+    expiración automática.
   - **`Reservation.receiptUrl`** (`String?`, nuevo): a pesar del nombre,
     guarda la **ruta** del objeto en el bucket privado de Supabase Storage
     `recibos-pago` (ej. `<reservationId>/<timestamp>-archivo.jpg`), no una
@@ -364,18 +366,44 @@ Button, Card y todas las páginas automáticamente.
     real encontrado y corregido: sin esto, un offset negativo (Costa Rica,
     UTC-6) corría la fecha un día hacia atrás (Fiestas de Verano aparecía
     el 9 en vez del 10 de abril).
-  - `Reservation.startTime`/`endTime` (`lib/actions/reservations.ts`) son
-    `new Date(\`${date}T${time}:00\`)`, **sin** sufijo de zona, que JS
-    interpreta en la hora **local** del servidor. Se formatean con
-    `formatLocalDate`/`formatTime` (sin `timeZone` fijo). Casi reintroduzco
-    el bug al construir la tabla de "Próximas Reservas": usar `formatDate`
-    (UTC) ahí mostraba el día siguiente para cualquier reserva que empezara
-    a las 18:00 o después (ej. una reserva de 20:00 aparecía fechada al día
-    siguiente). `formatDateRange`/`isSameUtcDay` son válidas solo para
-    `Event`, no usarlas con fechas de `Reservation`.
+  - `Reservation.startTime`/`endTime`/`depositDeadline`
+    (`lib/actions/reservations.ts`) se construyen con `toCostaRicaDate`/
+    `costaRicaTodayDateString` (`lib/timezone.ts`) — ancladas explícitamente
+    a `America/Costa_Rica` (offset fijo `-06:00`, sin horario de verano) vía
+    el sufijo de zona en el string, en vez de `new Date(\`${date}T${time}:00\`)`
+    sin sufijo. Se formatean con `formatLocalDate`/`formatTime`, que ahora
+    fijan `timeZone: "America/Costa_Rica"` explícitamente (mismo patrón que
+    `formatDate` con `"UTC"`). **Bug real encontrado en producción y
+    corregido** (no confundir con el bug de arriba, de `Event`): antes,
+    tanto la escritura (`new Date()` sin sufijo de zona) como el formateo
+    (`formatTime`/`formatLocalDate` sin `timeZone` fijo) dependían de la
+    zona horaria del **proceso** que ejecutaba el código, no de una zona
+    fija — correcto mientras todo corriera en local (Costa Rica), pero
+    Vercel corre en UTC por defecto (sin `TZ` configurada). Resultado: la
+    misma reserva se guardaba con un valor UTC distinto según si el
+    `createReservation` que la escribió corrió en Vercel o en local, y
+    además se mostraba distinto en pantallas distintas según la zona del
+    proceso que las renderizaba — se detectó con una reserva real (Nelson,
+    31 jul 2026, Cancha de Fútbol 11) que aparecía como "19:00-21:00" en la
+    tabla pública (renderizada en Vercel/UTC) y "13:00-15:00" en el modal de
+    `/admin/agenda` (renderizado en local/Costa Rica), exactamente 6 horas
+    de diferencia — mismo dato, mismísima función de formato, dos zonas de
+    proceso distintas. El fix ancla ambos lados (escritura y lectura) a
+    Costa Rica de forma explícita, así que ya no importa en qué entorno
+    corra el proceso. **No corrige retroactivamente filas ya guardadas
+    antes del fix** (creadas por un proceso en Vercel/UTC, con el string
+    tipeado grabado directo como hora UTC sin el corrimiento +6) — esas
+    quedan pendientes de corrección manual, dato por dato, tras confirmar
+    la hora real con cada persona.
+  - `formatDateRange`/`isSameUtcDay` son válidas solo para `Event`, no
+    usarlas con fechas de `Reservation`.
   - Regla práctica: antes de formatear una fecha nueva, revisar cómo se
-    construyó ese campo (`new Date("YYYY-MM-DD")` → UTC; `new Date(`...T...`)`
-    sin zona → local) y usar el formateador que corresponda.
+    construyó ese campo (`new Date("YYYY-MM-DD")` → UTC; `toCostaRicaDate`
+    → Costa Rica) y usar el formateador que corresponda. Cualquier
+    construcción nueva de una fecha/hora de pared (no un instante `now()`)
+    debe pasar por `toCostaRicaDate`/`costaRicaTodayDateString`
+    (`lib/timezone.ts`), nunca `new Date(...)` sin sufijo de zona — ese
+    patrón es exactamente el que causó el bug de arriba.
 - `lib/pricing.ts` — lógica de precios del contrato real de alquiler:
   - Salón Multiusos: `SALON_BASE_RATE` (¢45.000 fijo por reserva) +
     `baseFurnitureSets * SALON_FURNITURE_SET_PRICE` (¢2.500 por set de 1 mesa

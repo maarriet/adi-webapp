@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { timeSlots } from "@/lib/mock-data";
 import { formatDate } from "@/lib/format";
+import { toCostaRicaDate, costaRicaTodayDateString } from "@/lib/timezone";
 import {
   CATERING_PACKAGES,
   calculateCateringTotal,
@@ -43,8 +44,8 @@ export async function getBookedSlots(
 
   await releaseExpiredDeposits();
 
-  const dayStart = new Date(`${date}T00:00:00`);
-  const dayEnd = new Date(`${date}T23:59:59`);
+  const dayStart = toCostaRicaDate(date, "00:00:00");
+  const dayEnd = toCostaRicaDate(date, "23:59:59");
 
   const reservations = await prisma.reservation.findMany({
     where: {
@@ -58,7 +59,7 @@ export async function getBookedSlots(
 
   return timeSlots.filter((time) =>
     reservations.some((reservation) => {
-      const slotStart = new Date(`${date}T${time}:00`);
+      const slotStart = toCostaRicaDate(date, `${time}:00`);
       const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
       return slotStart < reservation.endTime && slotEnd > reservation.startTime;
     }),
@@ -268,8 +269,8 @@ async function calculateServerTotalAmount(
 export async function createReservation(
   input: CreateReservationInput,
 ): Promise<CreateReservationResult> {
-  const startTime = new Date(`${input.date}T${input.startTime}:00`);
-  const endTime = new Date(`${input.date}T${input.endTime}:00`);
+  const startTime = toCostaRicaDate(input.date, `${input.startTime}:00`);
+  const endTime = toCostaRicaDate(input.date, `${input.endTime}:00`);
 
   if (await hasReservationConflict(input.spaceId, startTime, endTime)) {
     return {
@@ -291,11 +292,13 @@ export async function createReservation(
   }
 
   // Plazo del depósito: fin del día en que se crea la reserva (hoy, hora
-  // local de Costa Rica) — no el día del evento. Mismo patrón de fecha
-  // "local sin conversión UTC" que ya usan startTime/endTime (ver
-  // lib/format.ts para el porqué de esta convención).
-  const depositDeadline = new Date();
-  depositDeadline.setHours(23, 59, 59, 999);
+  // de Costa Rica) — no el día del evento. Anclado explícitamente a
+  // America/Costa_Rica (ver lib/timezone.ts) — no depender de la zona del
+  // proceso, que en Vercel es UTC.
+  const depositDeadline = toCostaRicaDate(
+    costaRicaTodayDateString(),
+    "23:59:59.999",
+  );
 
   const created = await prisma.reservation.create({
     data: {
@@ -350,8 +353,8 @@ export type CreateManualReservationInput = {
 export async function createManualReservation(
   input: CreateManualReservationInput,
 ): Promise<CreateReservationResult> {
-  const startTime = new Date(`${input.date}T${input.startTime}:00`);
-  const endTime = new Date(`${input.date}T${input.endTime}:00`);
+  const startTime = toCostaRicaDate(input.date, `${input.startTime}:00`);
+  const endTime = toCostaRicaDate(input.date, `${input.endTime}:00`);
 
   if (startTime >= endTime) {
     return {

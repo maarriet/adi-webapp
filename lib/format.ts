@@ -3,19 +3,24 @@
 // Intl.DateTimeFormat en cada página.
 //
 // IMPORTANTE — hay dos convenciones de construcción de fechas en este
-// proyecto, y cada una necesita su propio formateador:
+// proyecto, y cada una necesita su propio formateador, ambos con
+// `timeZone` fijo (nunca depender de la zona del proceso que renderiza):
 //   1. `Event.startDate`/`endDate` (seed) se guardan como
 //      `new Date("YYYY-MM-DD")`, que el motor de JS interpreta como
 //      medianoche **UTC**. Usar `formatDate`/`formatDateRange` (fijan
 //      `timeZone: "UTC"`) — sin esto, un offset negativo (ej. Costa Rica,
 //      UTC-6) corre la fecha mostrada un día hacia atrás.
-//   2. `Reservation.startTime`/`endTime` (lib/actions/reservations.ts) se
-//      guardan como `new Date(`${date}T${time}:00`)`, SIN sufijo de zona,
-//      que JS interpreta en la hora **local** del servidor. Usar
-//      `formatLocalDate`/`formatTime` (SIN `timeZone` fijo) — si se les
-//      aplica `timeZone: "UTC"` por error, una reserva que empieza a las
-//      18:00 o después (que en UTC-6 cae al día siguiente en UTC) se
-//      muestra con la fecha equivocada.
+//   2. `Reservation.startTime`/`endTime`/`depositDeadline`
+//      (lib/actions/reservations.ts) se guardan ancladas explícitamente a
+//      Costa Rica vía `lib/timezone.ts` (`toCostaRicaDate`). Usar
+//      `formatLocalDate`/`formatTime` (fijan `timeZone:
+//      "America/Costa_Rica"`) — bug real encontrado en producción: antes
+//      estas dos funciones NO fijaban zona (usaban los getters locales de
+//      Date), así que la misma reserva se mostraba distinto según la zona
+//      horaria del proceso que la renderizaba (local en dev = Costa Rica,
+//      Vercel = UTC por defecto) — un desfase real de 6 horas entre
+//      pantallas viendo la misma fila. Ver CLAUDE.md para el caso real
+//      (reserva de Nelson) que expuso esto.
 // Mezclar estas dos funciones entre los dos tipos de fecha reintroduce el
 // bug de "un día de diferencia" en una dirección o la otra.
 
@@ -49,18 +54,31 @@ export function formatDateRange(start: Date, end: Date | null): string {
   return `${startStr} – ${formatDate(end)}`;
 }
 
-// Para Reservation.startTime/endTime — ver nota de convenciones arriba.
-// Sin `timeZone` fijo: usa la hora local del servidor, igual que como se
-// construyeron.
+// Para Reservation.startTime/endTime/depositDeadline — ver nota de
+// convenciones arriba. `timeZone` fijo a Costa Rica: independiente de la
+// zona del proceso que renderiza (local en dev, UTC en Vercel).
 export function formatLocalDate(date: Date): string {
-  return new Intl.DateTimeFormat("es-CR", { dateStyle: "long" }).format(date);
+  return new Intl.DateTimeFormat("es-CR", {
+    dateStyle: "long",
+    timeZone: "America/Costa_Rica",
+  }).format(date);
 }
 
-// Para Reservation.startTime/endTime — ver nota de convenciones arriba.
-// Devuelve "HH:mm", ej. "15:00".
+// Para Reservation.startTime/endTime/depositDeadline — ver nota de
+// convenciones arriba. Devuelve "HH:mm", ej. "15:00", ya en hora de Costa
+// Rica sin importar la zona del proceso.
 export function formatTime(date: Date): string {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const parts = new Intl.DateTimeFormat("es-CR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    // hourCycle explícito, no hour12: false — hour12:false por sí solo
+    // puede devolver "24" a medianoche en vez de "00" en algunos motores
+    // ICU (quirk conocido de Node).
+    hourCycle: "h23",
+    timeZone: "America/Costa_Rica",
+  }).formatToParts(date);
+  const hours = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const minutes = parts.find((p) => p.type === "minute")?.value ?? "00";
   return `${hours}:${minutes}`;
 }
 
