@@ -5,7 +5,11 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { timeSlots } from "@/lib/mock-data";
 import { formatDate } from "@/lib/format";
-import { toCostaRicaDate, costaRicaTodayDateString } from "@/lib/timezone";
+import {
+  toCostaRicaDate,
+  costaRicaTodayDateString,
+  costaRicaDayOfWeek,
+} from "@/lib/timezone";
 import {
   CATERING_PACKAGES,
   calculateCateringTotal,
@@ -29,17 +33,22 @@ export async function releaseExpiredDeposits(): Promise<void> {
       depositDeadline: { lt: new Date() },
       status: { not: "CANCELLED" },
     },
-    data: { status: "CANCELLED" },
+    data: { status: "CANCELLED", autoExpired: true },
   });
 }
 
+export type BookedSlot = { time: string; reason: "reserved" | "contract" };
+
 // Devuelve qué horas de `timeSlots` ya están ocupadas para ese espacio en esa
-// fecha exacta, según reservas existentes que se solapen (se excluyen las
-// canceladas).
+// fecha exacta — por una Reservation real que se solape (se excluyen las
+// canceladas) o por un RecurringBlock activo (horarios comprometidos cada
+// semana por contratos previos al sitio, ver CLAUDE.md) para ese día de la
+// semana. `reason` le permite a la UI (StepFechaHora.tsx) distinguir un
+// horario ya tomado por otro visitante de uno reservado por contrato.
 export async function getBookedSlots(
   spaceId: string,
   date: string,
-): Promise<string[]> {
+): Promise<BookedSlot[]> {
   if (!spaceId || !date) return [];
 
   await releaseExpiredDeposits();
@@ -47,23 +56,41 @@ export async function getBookedSlots(
   const dayStart = toCostaRicaDate(date, "00:00:00");
   const dayEnd = toCostaRicaDate(date, "23:59:59");
 
-  const reservations = await prisma.reservation.findMany({
-    where: {
-      spaceId,
-      status: { not: "CANCELLED" },
-      startTime: { lt: dayEnd },
-      endTime: { gt: dayStart },
-    },
-    select: { startTime: true, endTime: true },
-  });
-
-  return timeSlots.filter((time) =>
-    reservations.some((reservation) => {
-      const slotStart = toCostaRicaDate(date, `${time}:00`);
-      const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
-      return slotStart < reservation.endTime && slotEnd > reservation.startTime;
+  const [reservations, recurringBlocks] = await Promise.all([
+    prisma.reservation.findMany({
+      where: {
+        spaceId,
+        status: { not: "CANCELLED" },
+        startTime: { lt: dayEnd },
+        endTime: { gt: dayStart },
+      },
+      select: { startTime: true, endTime: true },
     }),
-  );
+    prisma.recurringBlock.findMany({
+      where: { spaceId, dayOfWeek: costaRicaDayOfWeek(date), active: true },
+      select: { startTime: true, endTime: true },
+    }),
+  ]);
+
+  const result: BookedSlot[] = [];
+  for (const time of timeSlots) {
+    const slotStart = toCostaRicaDate(date, `${time}:00`);
+    const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
+    if (
+      reservations.some(
+        (r) => slotStart < r.endTime && slotEnd > r.startTime,
+      )
+    ) {
+      result.push({ time, reason: "reserved" });
+      continue;
+    }
+    // Comparación directa de strings "HH:mm" — timeSlots y los bloqueos son
+    // siempre horas exactas del mismo día, sin cruce de medianoche.
+    if (recurringBlocks.some((b) => time >= b.startTime && time < b.endTime)) {
+      result.push({ time, reason: "contract" });
+    }
+  }
+  return result;
 }
 
 // Compartida entre createReservation y createManualReservation — misma
@@ -445,4 +472,55 @@ export async function cancelReservation(reservationId: string): Promise<void> {
     data: { status: "CANCELLED" },
   });
   revalidatePath("/admin/agenda");
+}
+
+export type ReactivateReservationResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+// Para reservas que releaseExpiredDeposits canceló solas (autoExpired:
+// true) cuando el cliente manda el comprobante tarde — sección "Reservas
+// autocanceladas" en /admin/agenda. Reusa hasReservationConflict (misma
+// query que createReservation/createManualReservation): la reserva sigue
+// CANCELLED en este punto, así que ese filtro ya la auto-excluye, no hace
+// falta pasarle un id a ignorar.
+export async function reactivateReservation(
+  reservationId: string,
+  paymentStatus: "DEPOSIT_PAID" | "FULLY_PAID",
+): Promise<ReactivateReservationResult> {
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+  });
+  if (!reservation) {
+    return { ok: false, error: "No se encontró la reserva." };
+  }
+
+  if (
+    await hasReservationConflict(
+      reservation.spaceId,
+      reservation.startTime,
+      reservation.endTime,
+    )
+  ) {
+    return {
+      ok: false,
+      error:
+        "Ese horario ya fue reservado por otra persona, no se puede reactivar. Contacta al cliente para ofrecerle otro horario.",
+    };
+  }
+
+  await prisma.reservation.update({
+    where: { id: reservationId },
+    data: {
+      status: "PENDING",
+      paymentStatus,
+      autoExpired: false,
+      // null a propósito, mismo criterio que createManualReservation: ya
+      // no debe expirar, el pago ya se confirmó.
+      depositDeadline: null,
+    },
+  });
+
+  revalidatePath("/admin/agenda");
+  return { ok: true };
 }

@@ -21,3 +21,12 @@ export function costaRicaTodayDateString(): string {
     timeZone: "America/Costa_Rica",
   }).format(new Date());
 }
+
+// Día de la semana (0=domingo...6=sábado, igual que Date.getDay()) de una
+// fecha "YYYY-MM-DD" — se parsea como medianoche UTC y se lee con el getter
+// UTC (mismo patrón que Event.startDate/formatDate en lib/format.ts): el
+// día de la semana de un string de fecha pura es una propiedad del
+// calendario, no de un instante — nunca depende de dónde corra el proceso.
+export function costaRicaDayOfWeek(date: string): number {
+  return new Date(`${date}T00:00:00Z`).getUTCDay();
+}

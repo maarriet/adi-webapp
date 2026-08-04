@@ -24,6 +24,7 @@ model Space {
   images       String[]
   availability Json
   reservations Reservation[]
+  recurringBlocks RecurringBlock[]
 }
 
 model Reservation {
@@ -70,7 +71,30 @@ model Reservation {
   // al vuelo desde esta ruta cada vez que se necesita mostrar el
   // comprobante (ver lib/supabase-admin.ts).
   receiptUrl String?
+  // true = esta reserva se canceló sola (releaseExpiredDeposits, depósito
+  // vencido) — distingue una cancelación automática de una manual del
+  // admin (cancelReservation no toca este campo, queda false). Permite
+  // listar y reactivar reservas autocanceladas en /admin/agenda cuando el
+  // cliente manda el comprobante tarde.
+  autoExpired Boolean @default(false)
   createdAt     DateTime      @default(now())
+}
+
+// Horarios comprometidos cada semana por contratos previos al sitio web
+// (grupos externos: Funcionales, Taekwondo, Básquetbol, Adulto Mayor) — se
+// repiten indefinidamente hacia adelante, así que no se modelan como
+// Reservation (no hay una fila por semana). getBookedSlots
+// (lib/actions/reservations.ts) los consulta además de las Reservation
+// reales para calcular disponibilidad del wizard público.
+model RecurringBlock {
+  id        String  @id @default(cuid())
+  spaceId   String
+  space     Space   @relation(fields: [spaceId], references: [id])
+  dayOfWeek Int // 0=domingo, 1=lunes, ... 6=sábado (igual que Date.getDay())
+  startTime String // "18:00"
+  endTime   String // "22:00"
+  label     String
+  active    Boolean @default(true)
 }
 
 model Project {

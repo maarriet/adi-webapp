@@ -255,6 +255,30 @@ Button, Card y todas las páginas automáticamente.
     espacio/fecha ya se habría limpiado segundos antes en la misma sesión;
     si se invoca `createReservation` de forma directa (sin pasar por el
     wizard), ese caso límite queda sin cubrir.
+  - **`Reservation.autoExpired`** (`Boolean`, default `false`): distingue
+    una cancelación automática por depósito vencido de una manual del
+    admin — `releaseExpiredDeposits` agrega `autoExpired: true` al mismo
+    `updateMany` que ya pone `status: "CANCELLED"`; `cancelReservation` no
+    toca este campo, así que una cancelación manual queda con `false` (el
+    default). Sección "Reservas autocanceladas" en `/admin/agenda`
+    (`AutoExpiredReservations.tsx`, colapsable, mismo patrón visual que
+    "Agregar reserva manual") lista `status: CANCELLED, autoExpired: true`
+    (más recientes primero, máx. 30) para cuando el cliente manda el
+    comprobante SINPE tarde y la ADI quiere recuperar la reserva en vez de
+    que la persona tenga que reservar de cero. Cada fila tiene un selector
+    50%/100% (según a qué corresponda el comprobante) y un botón
+    "Reactivar y marcar pagada" → `reactivateReservation(id, paymentStatus)`
+    (`lib/actions/reservations.ts`): reusa `hasReservationConflict` (la
+    misma reserva sigue `CANCELLED` en ese punto, así que ese filtro ya la
+    auto-excluye de su propia búsqueda de conflicto) para no reactivar
+    sobre un horario que otra persona ya tomó mientras tanto — en ese caso
+    devuelve un error sin tocar la fila; si no hay conflicto, pone
+    `status: "PENDING"`, el `paymentStatus` elegido, `autoExpired: false`
+    y `depositDeadline: null` (igual que `createManualReservation`, para
+    que quede exenta de una nueva expiración automática). No hace falta
+    lógica especial en `ReservationCard.tsx` ni en la query principal de
+    la página: al dejar de ser `CANCELLED`, la fila aparece sola en la
+    lista normal con todos sus botones de siempre.
   - **Vista pública vs. admin**: la query de "Próximas Reservas"
     (`app/reservaciones/page.tsx`) filtra
     `paymentStatus: { not: "DEPOSIT_PENDING" }` — una reserva sin depósito

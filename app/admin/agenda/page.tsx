@@ -12,6 +12,7 @@ import {
 } from "./whatsapp-message";
 import { ReservationCard } from "./ReservationCard";
 import { AddManualReservationForm } from "./AddManualReservationForm";
+import { AutoExpiredReservations } from "./AutoExpiredReservations";
 
 // Vista interna, con datos que cambian en cada reserva — no pre-renderizar.
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export default async function AdminAgendaPage() {
   // el modal de detalle usa esos campos sin necesidad de ampliar esta
   // query. Sin filtro de paymentStatus a propósito: el admin necesita ver
   // también las DEPOSIT_PENDING.
-  const [reservations, spaces] = await Promise.all([
+  const [reservations, spaces, autoExpiredReservations] = await Promise.all([
     prisma.reservation.findMany({
       where: { status: { not: "CANCELLED" }, startTime: { gte: new Date() } },
       orderBy: { startTime: "asc" },
@@ -38,6 +39,17 @@ export default async function AdminAgendaPage() {
       where: { bookable: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
+    }),
+    // Sección "Reservas autocanceladas" — solo las que releaseExpiredDeposits
+    // canceló solas (autoExpired: true), no las canceladas a mano por el
+    // admin. Más recientes primero, no filtra por fecha futura/pasada a
+    // propósito (el cliente puede mandar el comprobante días después de que
+    // pasó la fecha límite del depósito, no del evento).
+    prisma.reservation.findMany({
+      where: { status: "CANCELLED", autoExpired: true },
+      orderBy: { startTime: "desc" },
+      take: 30,
+      include: { space: { select: { name: true } } },
     }),
   ]);
 
@@ -135,6 +147,15 @@ export default async function AdminAgendaPage() {
     }),
   );
 
+  const autoExpiredCards = autoExpiredReservations.map((reservation) => ({
+    id: reservation.id,
+    contractorName: reservation.contractorName,
+    spaceName: reservation.space.name,
+    startTime: reservation.startTime,
+    endTime: reservation.endTime,
+    totalAmount: Number(reservation.totalAmount),
+  }));
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <h1 className="font-heading text-2xl text-neutral-900">
@@ -146,6 +167,7 @@ export default async function AdminAgendaPage() {
       </p>
 
       <AddManualReservationForm spaces={spaces} />
+      <AutoExpiredReservations reservations={autoExpiredCards} />
 
       {cards.length === 0 ? (
         <p className="mt-6 text-neutral-600">

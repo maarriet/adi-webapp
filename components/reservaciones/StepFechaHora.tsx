@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { CalendarSlot, type CalendarSlotProps } from "@/components/ui/CalendarSlot";
 import { FormField } from "@/components/ui/FormField";
 import { timeSlots } from "@/lib/mock-data";
-import { getBookedSlots } from "@/lib/actions/reservations";
+import { getBookedSlots, type BookedSlot } from "@/lib/actions/reservations";
 import { formatDurationLabel } from "@/lib/format";
 import {
   CATERING_PACKAGES,
@@ -30,7 +30,7 @@ export function StepFechaHora({
   totalAmount: number;
   maxDurationMinutes: number | null;
 }) {
-  const [bookedSlots, setBookedSlots] = useState<string[]>([]);
+  const [bookedSlots, setBookedSlots] = useState<BookedSlot[]>([]);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
 
   useEffect(() => {
@@ -60,10 +60,22 @@ export function StepFechaHora({
     current: string | null,
     disableUpTo?: string | null,
   ): CalendarSlotProps["status"] {
-    if (bookedSlots.includes(time)) return "booked";
+    if (bookedSlots.some((slot) => slot.time === time)) return "booked";
     if (disableUpTo && time <= disableUpTo) return "disabled";
     if (current === time) return "selected";
     return "available";
+  }
+
+  // Solo los horarios bloqueados por contrato (RecurringBlock, ver
+  // lib/actions/reservations.ts) llevan un tooltip distinto — los ya
+  // tomados por otro visitante se ven igual de deshabilitados pero sin
+  // título adicional, mismo comportamiento que antes.
+  function bookedTitle(time: string): string | undefined {
+    const slot = bookedSlots.find((s) => s.time === time);
+    if (slot?.reason === "contract") {
+      return "No disponible — horario reservado por contrato";
+    }
+    return undefined;
   }
 
   function timeToMinutes(time: string): number {
@@ -115,6 +127,7 @@ export function StepFechaHora({
               time={time}
               status={slotStatus(time, form.startTime)}
               onSelect={() => updateField("startTime", time)}
+              title={bookedTitle(time)}
             />
           ))}
         </div>
@@ -135,7 +148,7 @@ export function StepFechaHora({
               title={
                 exceedsMaxDuration(time) && maxDurationMinutes
                   ? `Excede el máximo de ${formatDurationLabel(maxDurationMinutes)} para este espacio`
-                  : undefined
+                  : bookedTitle(time)
               }
             />
           ))}

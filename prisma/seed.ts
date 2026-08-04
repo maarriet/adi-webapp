@@ -65,6 +65,88 @@ const spaces = [
 // Fútbol 11, que ya tiene su propia tarjeta con precio real) — confirmado
 // sin reservas asociadas antes de borrar la fila. Ver CLAUDE.md.
 
+// Horarios comprometidos cada semana por contratos previos al sitio web
+// (grupos externos) — ver CLAUDE.md / lib/actions/reservations.ts
+// (getBookedSlots). RecurringBlock no tiene una clave de negocio natural
+// como Space.id o Event.slug, así que se le da un id legible explícito en
+// vez de dejar el cuid() por default del schema — mismo truco que ya usa
+// `spaces` arriba, necesario para que el upsert sea re-ejecutable sin
+// duplicar filas. dayOfWeek: 0=domingo...6=sábado.
+const recurringBlocks = [
+  {
+    id: "recblock-lunes-futsal",
+    spaceId: "cancha-futsal",
+    dayOfWeek: 1,
+    startTime: "18:00",
+    endTime: "22:00",
+    label: "Funcionales / Taekwondo / Básquetbol",
+    active: true,
+  },
+  {
+    id: "recblock-lunes-salon",
+    spaceId: "salon-multiusos",
+    dayOfWeek: 1,
+    startTime: "18:00",
+    endTime: "22:00",
+    label: "Funcionales / Taekwondo / Básquetbol",
+    active: true,
+  },
+  {
+    id: "recblock-lunes-cocina",
+    spaceId: "cocina-comedor",
+    dayOfWeek: 1,
+    startTime: "18:00",
+    endTime: "22:00",
+    label: "Taekwondo",
+    active: true,
+  },
+  {
+    id: "recblock-martes-futsal",
+    spaceId: "cancha-futsal",
+    dayOfWeek: 2,
+    startTime: "20:00",
+    endTime: "22:00",
+    label: "Básquetbol",
+    active: true,
+  },
+  {
+    id: "recblock-miercoles-futsal",
+    spaceId: "cancha-futsal",
+    dayOfWeek: 3,
+    startTime: "18:00",
+    endTime: "21:00",
+    label: "Funcionales / Taekwondo",
+    active: true,
+  },
+  {
+    id: "recblock-miercoles-salon",
+    spaceId: "salon-multiusos",
+    dayOfWeek: 3,
+    startTime: "18:00",
+    endTime: "21:00",
+    label: "Funcionales / Taekwondo",
+    active: true,
+  },
+  {
+    id: "recblock-miercoles-cocina",
+    spaceId: "cocina-comedor",
+    dayOfWeek: 3,
+    startTime: "18:00",
+    endTime: "21:00",
+    label: "Taekwondo",
+    active: true,
+  },
+  {
+    id: "recblock-jueves-cocina",
+    spaceId: "cocina-comedor",
+    dayOfWeek: 4,
+    startTime: "08:00",
+    endTime: "13:00",
+    label: "Grupo de Adulto Mayor",
+    active: true,
+  },
+];
+
 const projects = [
   {
     id: "comite-lote-adi",
@@ -194,6 +276,15 @@ async function main() {
     });
   }
   console.log(`Seeded ${events.length} events.`);
+
+  for (const block of recurringBlocks) {
+    await prisma.recurringBlock.upsert({
+      where: { id: block.id },
+      update: block,
+      create: block,
+    });
+  }
+  console.log(`Seeded ${recurringBlocks.length} recurring blocks.`);
 }
 
 main()
