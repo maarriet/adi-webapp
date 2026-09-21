@@ -40,7 +40,7 @@ const spaces = [
     capacity: 200,
     baseRate: 25000, // diurno
     nightRate: 35000, // nocturno (18:00+)
-    bookable: true,
+    bookable: false, // deshabilitada temporalmente para el público, ver CLAUDE.md
     maxDurationMinutes: 120,
     images: ["/images/spaces/Plaza_fut11.jpg"] as string[],
     availability: {},
@@ -54,7 +54,7 @@ const spaces = [
     capacity: 80,
     baseRate: 10000,
     nightRate: null, // ya no aplica tarifa nocturna
-    bookable: true,
+    bookable: false, // deshabilitada temporalmente para el público, ver CLAUDE.md
     maxDurationMinutes: 60,
     images: ["/images/spaces/Cancha_Futsal.jpg"] as string[],
     availability: {},

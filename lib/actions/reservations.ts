@@ -296,6 +296,22 @@ async function calculateServerTotalAmount(
 export async function createReservation(
   input: CreateReservationInput,
 ): Promise<CreateReservationResult> {
+  // El wizard ya solo ofrece espacios con bookable: true (ver
+  // app/reservaciones/page.tsx), pero eso es solo una restricción de UI —
+  // esta Server Action es la fuente de verdad, así que se revisa de nuevo
+  // acá: alguien podría invocarla directo con el spaceId de un espacio
+  // deshabilitado temporalmente (ver CLAUDE.md) sin pasar por el wizard.
+  const targetSpace = await prisma.space.findUnique({
+    where: { id: input.spaceId },
+    select: { bookable: true },
+  });
+  if (!targetSpace?.bookable) {
+    return {
+      ok: false,
+      error: "Este espacio no está disponible para reservar en este momento.",
+    };
+  }
+
   const startTime = toCostaRicaDate(input.date, `${input.startTime}:00`);
   const endTime = toCostaRicaDate(input.date, `${input.endTime}:00`);
 
